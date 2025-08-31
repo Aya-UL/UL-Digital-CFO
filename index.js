@@ -1,81 +1,105 @@
-// index.js (CommonJS version)
+// index.js
 
-const { App } = require("@slack/bolt");
-const fetch = require("node-fetch");
-require("dotenv").config();
+import { App } from "@slack/bolt";
+import fetch from "node-fetch";
 
-// Initialize Slack app
+// -------------------
+// 🔑 Environment variables
+// -------------------
+const {
+  SLACK_BOT_TOKEN,
+  SLACK_SIGNING_SECRET,
+  ZB_CLIENT_ID,
+  ZB_CLIENT_SECRET,
+  ZB_REFRESH_TOKEN,
+  ORG_ID_KK,
+  ORG_ID_PT,
+} = process.env;
+
+// -------------------
+// 🌍 Zoho Books API base URLs
+// -------------------
+const ZOHO_BOOKS_API = "https://books.zoho.com/api/v3";   // Global (for PT - Indonesia)
+const ZOHO_BOOKS_API_JP = "https://books.zoho.jp/api/v3"; // Japan (for KK)
+
+// -------------------
+// 🚀 Slack App
+// -------------------
 const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  token: SLACK_BOT_TOKEN,
+  signingSecret: SLACK_SIGNING_SECRET,
 });
 
-// --- Helper: Fetch Cash Balance from Zoho Books ---
-async function getCashBalance(orgId) {
+// -------------------
+// 🔄 Function to fetch cash balance from Zoho
+// -------------------
+async function getCashBalance(orgId, country) {
   try {
-    const url = `${ZOHO_BOOKS_API}/chartofaccounts?organization_id=${orgId}`;
+    // Choose API base URL depending on org
+    const baseUrl = country === "JP" ? ZOHO_BOOKS_API_JP : ZOHO_BOOKS_API;
+    const url = `${baseUrl}/chartofaccounts?organization_id=${orgId}`;
+
     const response = await fetch(url, {
       headers: {
-        Authorization: `Zoho-oauthtoken ${process.env.ZB_REFRESH_TOKEN}`,
+        Authorization: `Zoho-oauthtoken ${ZB_REFRESH_TOKEN}`,
       },
     });
 
-    const data = await response.json();
-
-    if (!data || !data.chartofaccounts) {
-      return null;
+    if (!response.ok) {
+      throw new Error(`Zoho API error ${response.status}`);
     }
 
-    // Find accounts containing "Cash"
-    const cashAccounts = data.chartofaccounts.filter(acc =>
-      acc.account_name.toLowerCase().includes("cash")
+    const data = await response.json();
+
+    if (!data.chartofaccounts) {
+      return "⚠️ No data returned";
+    }
+
+    // ✅ Filter cash/bank accounts only
+    const cashAccounts = data.chartofaccounts.filter(
+      (acc) => acc.account_type === "cash" || acc.account_type === "bank"
     );
 
-    // Sum balances
-    const total = cashAccounts.reduce((sum, acc) => sum + (acc.balance || 0), 0);
+    if (cashAccounts.length === 0) {
+      return "⚠️ No cash/bank accounts found";
+    }
 
-    return { total, accounts: cashAccounts };
+    // Sum balances
+    const total = cashAccounts.reduce((sum, acc) => sum + acc.balance, 0);
+
+    return `¥${total.toLocaleString()}`;
   } catch (err) {
     console.error("Error fetching Zoho cash balance:", err);
-    return null;
+    return "⚠️ Error fetching balance";
   }
 }
 
-// --- Slack Listener ---
-app.message(/cash balance|show.*cash/i, async ({ message, say }) => {
+// -------------------
+// 💬 Slack message handling
+// -------------------
+app.message(/cash balance/i, async ({ message, say }) => {
   const text = message.text.toLowerCase();
 
-  let reply = "";
-
   if (text.includes("kk")) {
-    const balance = await getCashBalance(process.env.ORG_ID_KK);
-    reply = balance
-      ? `💰 KK Cash Balance: ¥${balance.total.toLocaleString()}`
-      : "⚠️ Sorry, couldn’t fetch KK cash balance.";
+    // KK only
+    const kkBalance = await getCashBalance(ORG_ID_KK, "JP");
+    await say(`🏦 KK Cash Balance: ${kkBalance}`);
   } else if (text.includes("pt")) {
-    const balance = await getCashBalance(process.env.ORG_ID_PT);
-    reply = balance
-      ? `💰 PT Cash Balance: Rp ${balance.total.toLocaleString()}`
-      : "⚠️ Sorry, couldn’t fetch PT cash balance.";
+    // PT only
+    const ptBalance = await getCashBalance(ORG_ID_PT, "PT");
+    await say(`🏦 PT Cash Balance: ${ptBalance}`);
   } else {
-    // Fetch both
-    const kk = await getCashBalance(process.env.ORG_ID_KK);
-    const pt = await getCashBalance(process.env.ORG_ID_PT);
+    // Default: show both
+    const kkBalance = await getCashBalance(ORG_ID_KK, "JP");
+    const ptBalance = await getCashBalance(ORG_ID_PT, "PT");
 
-    reply =
-      (kk
-        ? `💰 KK: ¥${kk.total.toLocaleString()}`
-        : "⚠️ KK balance not available") +
-      "\n" +
-      (pt
-        ? `💰 PT: Rp ${pt.total.toLocaleString()}`
-        : "⚠️ PT balance not available");
+    await say(`🏦 KK: ${kkBalance}\n🏦 PT: ${ptBalance}`);
   }
-
-  await say(reply);
 });
 
-// --- Start the App ---
+// -------------------
+// ⚡ Start App
+// -------------------
 (async () => {
   await app.start(process.env.PORT || 3000);
   console.log("⚡ UL CFO bot is running!");
