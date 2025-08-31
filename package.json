@@ -1,0 +1,11 @@
+{
+  "name": "ul-cfo-bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@slack/bolt": "^3.12.2",
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.0",
+    "openai": "^4.0.0"
+  }
+}
