@@ -1,11 +1,13 @@
 {
-  "name": "ul-cfo-bot",
+  "name": "ul-digital-cfo",
   "version": "1.0.0",
   "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
-    "@slack/bolt": "^3.12.2",
-    "axios": "^1.6.7",
-    "dotenv": "^16.4.0",
-    "openai": "^4.0.0"
+    "@slack/bolt": "^3.17.1",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^2.6.7"
   }
 }
