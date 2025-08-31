@@ -2,7 +2,7 @@
   "name": "ul-digital-cfo",
   "version": "1.0.0",
   "main": "index.js",
-  "type": "module",   ← add this line
+  "type": "module",
   "dependencies": {
     "@slack/bolt": "^3.15.0",
     "dotenv": "^16.0.3",
