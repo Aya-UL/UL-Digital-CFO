@@ -1,20 +1,21 @@
 // index.js
-require("dotenv").config();
-const { App } = require("@slack/bolt");
-const fetch = require("node-fetch");
+import { App } from "@slack/bolt";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
+dotenv.config();
 
-// Slack app setup
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
-// Zoho API setup
-const ZOHO_BOOKS_API = "https://www.zohoapis.com/books/v3"; // ✅ fixed
+// ----------------- ZOHO AUTH HANDLING -----------------
 let accessToken = null;
+let tokenExpiry = 0;
 
-// Refresh Zoho token
-async function refreshZohoToken() {
+async function refreshAccessToken() {
+  if (Date.now() < tokenExpiry && accessToken) return accessToken;
+
   const res = await fetch("https://accounts.zoho.com/oauth/v2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -27,108 +28,129 @@ async function refreshZohoToken() {
   });
 
   const data = await res.json();
-  if (data.access_token) {
-    accessToken = data.access_token;
-    console.log("🔑 Zoho access token refreshed");
-  } else {
-    console.error("❌ Failed to refresh token:", data);
+  if (!res.ok || data.error) {
+    console.error("Failed to refresh token:", data);
+    throw new Error("Zoho auth failed");
   }
-}
 
-async function ensureAccessToken() {
-  if (!accessToken) {
-    await refreshZohoToken();
-  }
+  accessToken = data.access_token;
+  tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  console.log("🔑 Zoho access token refreshed");
   return accessToken;
 }
 
-// Generic Zoho fetch
-async function zohoFetch(endpoint, orgId) {
-  const token = await ensureAccessToken();
-  const url = `${ZOHO_BOOKS_API}${endpoint}?organization_id=${orgId}`;
-
+async function zohoFetch(path, orgId) {
+  const token = await refreshAccessToken();
+  const url = `https://books.zohoapis.com/api/v3${path}&organization_id=${orgId}`;
   const res = await fetch(url, {
     headers: { Authorization: `Zoho-oauthtoken ${token}` },
   });
-
   const data = await res.json();
-  if (data.code && data.code !== 0) {
+  if (!res.ok || data.code !== 0) {
     console.error("Zoho API error:", data);
-    return null;
+    throw new Error("Zoho API error");
   }
   return data;
 }
 
-// Cash balance
+// ----------------- QUERIES -----------------
 async function getCashBalance(orgId) {
-  const data = await zohoFetch("/chartofaccounts", orgId);
-  if (!data) return "⚠️ not available";
+  try {
+    const data = await zohoFetch("/chartofaccounts?filter_by=AccountType.Cash", orgId);
+    if (!data || !data.chartofaccounts) return "⚠️ not available";
 
-  const cashAccts = data.chartofaccounts.filter(
-    (acct) => acct.account_type === "cash"
-  );
-  if (cashAccts.length === 0) return "⚠️ no cash accounts";
+    const cashAccts = data.chartofaccounts;
+    if (cashAccts.length === 0) return "⚠️ no cash accounts";
 
-  const total = cashAccts.reduce((sum, acct) => sum + acct.balance, 0);
-  return `¥${total.toLocaleString()}`;
+    const total = cashAccts.reduce((sum, acct) => {
+      const bal = parseFloat(
+        acct.current_balance || acct.balance || acct.account_balance || 0
+      );
+      return sum + (isNaN(bal) ? 0 : bal);
+    }, 0);
+
+    return `¥${total.toLocaleString()}`;
+  } catch (err) {
+    console.error("Error fetching Zoho cash balance:", err);
+    return "⚠️ not available";
+  }
 }
 
-// Invoices
 async function getInvoices(orgId) {
-  const data = await zohoFetch("/invoices", orgId);
-  if (!data || !data.invoices) return "⚠️ not available";
-
-  return data.invoices
-    .map((inv) => `#${inv.invoice_number} – ${inv.status} – ${inv.total}`)
-    .join("\n");
+  try {
+    const data = await zohoFetch("/invoices?per_page=10", orgId); // fetch more than 3
+    return data.invoices?.map((inv) => ({
+      number: inv.invoice_number,
+      customer: inv.customer_name,
+      amount: inv.total,
+      status: inv.status,
+    }));
+  } catch {
+    return [];
+  }
 }
 
-// Bills
 async function getBills(orgId) {
-  const data = await zohoFetch("/bills", orgId);
-  if (!data || !data.bills) return "⚠️ not available";
-
-  return data.bills
-    .map((bill) => `#${bill.bill_number} – ${bill.status} – ${bill.total}`)
-    .join("\n");
+  try {
+    const data = await zohoFetch("/bills?per_page=10", orgId); // fetch more than 3
+    return data.bills?.map((bill) => ({
+      number: bill.bill_number,
+      vendor: bill.vendor_name,
+      amount: bill.total,
+      status: bill.status,
+    }));
+  } catch {
+    return [];
+  }
 }
 
-// P&L
 async function getPnL(orgId) {
-  const data = await zohoFetch("/reports/profitandloss", orgId);
-  if (!data || !data.report) return "⚠️ not available";
-
-  return `P&L Summary: ${JSON.stringify(data.report, null, 2).slice(0, 400)}...`;
+  try {
+    const data = await zohoFetch("/profitandloss?date_range=this_month", orgId);
+    return data;
+  } catch {
+    return null;
+  }
 }
 
-// Slack handlers
-app.message(/cash balance/i, async ({ say }) => {
-  const kk = await getCashBalance(process.env.ORG_ID_KK);
-  const pt = await getCashBalance(process.env.ORG_ID_PT);
-  await say(`💰 *Cash Balances:*\nKK: ${kk}\nPT: ${pt}`);
+// ----------------- SLACK LISTENER -----------------
+app.message(/cash balance/i, async ({ message, say }) => {
+  const [kk, pt] = await Promise.all([
+    getCashBalance(process.env.ORG_ID_KK),
+    getCashBalance(process.env.ORG_ID_PT),
+  ]);
+
+  await say(
+    `💰 *Cash Balances:*\nKK: ${kk}\nPT: ${pt}`
+  );
 });
 
 app.message(/invoices/i, async ({ say }) => {
-  const kk = await getInvoices(process.env.ORG_ID_KK);
-  const pt = await getInvoices(process.env.ORG_ID_PT);
-  await say(`📄 *Invoices:*\nKK:\n${kk}\n\nPT:\n${pt}`);
+  const invoices = await getInvoices(process.env.ORG_ID_KK);
+  if (!invoices.length) return await say("⚠️ No invoices found");
+  const text = invoices.map(
+    (i) => `#${i.number} | ${i.customer} | ¥${i.amount} | ${i.status}`
+  ).join("\n");
+  await say(`📑 *Invoices (KK)*:\n${text}`);
 });
 
 app.message(/bills/i, async ({ say }) => {
-  const kk = await getBills(process.env.ORG_ID_KK);
-  const pt = await getBills(process.env.ORG_ID_PT);
-  await say(`📑 *Bills:*\nKK:\n${kk}\n\nPT:\n${pt}`);
+  const bills = await getBills(process.env.ORG_ID_KK);
+  if (!bills.length) return await say("⚠️ No bills found");
+  const text = bills.map(
+    (b) => `#${b.number} | ${b.vendor} | ¥${b.amount} | ${b.status}`
+  ).join("\n");
+  await say(`📑 *Bills (KK)*:\n${text}`);
 });
 
 app.message(/p&l|profit/i, async ({ say }) => {
-  const kk = await getPnL(process.env.ORG_ID_KK);
-  const pt = await getPnL(process.env.ORG_ID_PT);
-  await say(`📊 *P&L:*\nKK:\n${kk}\n\nPT:\n${pt}`);
+  const pnl = await getPnL(process.env.ORG_ID_KK);
+  if (!pnl) return await say("⚠️ P&L not available");
+  await say(`📊 *P&L (KK this month)*:\n${JSON.stringify(pnl, null, 2)}`);
 });
 
-// Start
+// ----------------- START -----------------
 (async () => {
-  await refreshZohoToken();
   await app.start(process.env.PORT || 3000);
-  console.log("⚡️ UL CFO bot is running (Phase 1: Slack ↔ Zoho KK+PT)");
+  console.log("⚡ UL CFO bot is running (Phase 1: Slack ↔ Zoho KK+PT)");
 })();
