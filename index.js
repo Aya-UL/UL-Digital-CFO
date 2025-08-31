@@ -13,7 +13,7 @@ const app = new App({
 // --- Helper: Fetch Cash Balance from Zoho Books ---
 async function getCashBalance(orgId) {
   try {
-    const url = `https://books.zohoapis.com/api/v3/chartofaccounts?organization_id=${orgId}`;
+    const url = `${ZOHO_BOOKS_API}/chartofaccounts?organization_id=${orgId}`;
     const response = await fetch(url, {
       headers: {
         Authorization: `Zoho-oauthtoken ${process.env.ZB_REFRESH_TOKEN}`,
