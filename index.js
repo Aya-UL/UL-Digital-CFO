@@ -11,7 +11,7 @@ const app = new App({
   signingSecret: process.env.SLACK_SIGNING_SECRET
 });
 
-// OpenAI setup
+// OpenAI setup (not yet used, but ready)
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // helper to refresh Zoho access token
@@ -27,26 +27,63 @@ async function getZohoAccessToken() {
   return res.data.access_token;
 }
 
-// simple example: reply when bot is mentioned
+// Demo handler (just proves bot is alive)
 app.event("app_mention", async ({ event, say }) => {
   const zohoToken = await getZohoAccessToken();
-
-  // demo call: fetch orgs to prove connection
   const orgs = await axios.get("https://books.zoho.com/api/v3/organizations", {
     headers: { Authorization: `Zoho-oauthtoken ${zohoToken}` }
   });
-
   await say(`Hello <@${event.user}> 👋 I can see ${orgs.data.organizations.length} org(s) in Zoho Books!`);
 });
 
 // Cash Balance command
 app.message(/cash balance/i, async ({ message, say }) => {
   try {
-    // For now, just reply with a placeholder
-    await say(`💰 Hi <@${message.user}>, I’ll fetch your Zoho Books cash balance here soon.`);
+    const text = message.text.toLowerCase();
+    const zohoToken = await getZohoAccessToken();
+
+    // helper to fetch bank balances
+    async function fetchBalance(orgId, label) {
+      const res = await axios.get("https://books.zoho.com/api/v3/bankaccounts", {
+        headers: { Authorization: `Zoho-oauthtoken ${zohoToken}` },
+        params: { organization_id: orgId }
+      });
+
+      let total = 0;
+      res.data.bankaccounts.forEach(acc => {
+        if (acc.balance !== undefined) {
+          total += acc.balance;
+        }
+      });
+
+      return { label, total };
+    }
+
+    let results = [];
+
+    if (text.includes("kk")) {
+      results.push(await fetchBalance(process.env.ORG_ID_KK, "KK"));
+    } else if (text.includes("pt")) {
+      results.push(await fetchBalance(process.env.ORG_ID_PT, "PT"));
+    } else {
+      // default: show both
+      results.push(await fetchBalance(process.env.ORG_ID_KK, "KK"));
+      results.push(await fetchBalance(process.env.ORG_ID_PT, "PT"));
+    }
+
+    let reply = "💰 Cash Balance:\n";
+    results.forEach(r => {
+      const formatted = r.label === "KK"
+        ? `¥${r.total.toLocaleString("en-US")}`
+        : `Rp${r.total.toLocaleString("en-US")}`;
+      reply += `• ${r.label}: ${formatted}\n`;
+    });
+
+    await say(reply);
+
   } catch (error) {
-    console.error("Error handling cash balance:", error);
-    await say("⚠️ Sorry, I had an issue fetching the cash balance.");
+    console.error("Error fetching cash balance:", error.response?.data || error.message);
+    await say("⚠️ Sorry, I couldn’t fetch the cash balance right now.");
   }
 });
 
