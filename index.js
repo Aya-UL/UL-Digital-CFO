@@ -1,106 +1,66 @@
-// index.js
-import pkg from "@slack/bolt";
-const { App } = pkg;
+import { App } from "@slack/bolt";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+
 dotenv.config();
 
-// ----------------------
-// Slack App Setup
-// ----------------------
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
-// ----------------------
-// Get Zoho Access Token
-// ----------------------
-async function getAccessToken() {
-  const url = `https://accounts.zoho.com/oauth/v2/token?refresh_token=${process.env.ZB_REFRESH_TOKEN}&client_id=${process.env.ZB_CLIENT_ID}&client_secret=${process.env.ZB_CLIENT_SECRET}&grant_type=refresh_token`;
+// ✅ Zoho API base URL (correct domain)
+const ZOHO_BOOKS_API = "https://www.zohoapis.com/books/v3";
 
-  try {
-    const response = await fetch(url, { method: "POST" });
-    const data = await response.json();
-
-    if (data.access_token) {
-      return data.access_token;
-    } else {
-      console.error("Failed to get access token:", data);
-      return null;
-    }
-  } catch (err) {
-    console.error("Error fetching access token:", err);
-    return null;
-  }
-}
-
-// ----------------------
-// Get Cash Balance
-// ----------------------
 async function getCashBalance(orgId) {
   try {
-    const token = await getAccessToken();
-    if (!token) return null;
-
-    const response = await fetch(
-      `https://books.zoho.com/api/v3/bankaccounts?organization_id=${orgId}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Zoho-oauthtoken ${token}`
-        }
+    const response = await fetch(`${ZOHO_BOOKS_API}/chartofaccounts?organization_id=${orgId}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Zoho-oauthtoken ${process.env.ZB_REFRESH_TOKEN}`
       }
-    );
+    });
 
     const data = await response.json();
 
-    if (!data || !data.bankaccounts) {
-      console.error("Zoho response error:", data);
+    if (!response.ok) {
+      console.error("Zoho API error:", data);
       return null;
     }
 
-    // Sum up all account balances
-    let total = 0;
-    data.bankaccounts.forEach(acc => {
-      total += acc.balance;
-    });
+    // Find accounts with type = "cash"
+    const cashAccounts = (data.chartofaccounts || []).filter(acc => acc.account_type === "cash");
+    const total = cashAccounts.reduce((sum, acc) => sum + (acc.current_balance || 0), 0);
 
     return total;
-  } catch (err) {
-    console.error("Error fetching Zoho cash balance:", err);
+  } catch (error) {
+    console.error("Error fetching Zoho cash balance:", error);
     return null;
   }
 }
 
-// ----------------------
-// Slack Message Handler
-// ----------------------
 app.message(/cash balance/i, async ({ message, say }) => {
-  const text = message.text.toLowerCase();
-
   let reply = "";
 
-  if (text.includes("kk")) {
+  // Check both orgs unless user specifies
+  if (/kk/i.test(message.text)) {
     const kkBalance = await getCashBalance(process.env.ORG_ID_KK);
-    reply += kkBalance !== null ? `💰 KK Balance: ${kkBalance}\n` : "⚠️ KK balance not available\n";
-  } else if (text.includes("pt")) {
+    reply = kkBalance !== null ? `💰 KK Cash Balance: ${kkBalance}` : "⚠️ KK balance not available";
+  } else if (/pt/i.test(message.text)) {
     const ptBalance = await getCashBalance(process.env.ORG_ID_PT);
-    reply += ptBalance !== null ? `💰 PT Balance: ${ptBalance}\n` : "⚠️ PT balance not available\n";
+    reply = ptBalance !== null ? `💰 PT Cash Balance: ${ptBalance}` : "⚠️ PT balance not available";
   } else {
     const kkBalance = await getCashBalance(process.env.ORG_ID_KK);
     const ptBalance = await getCashBalance(process.env.ORG_ID_PT);
 
-    reply += kkBalance !== null ? `💰 KK Balance: ${kkBalance}\n` : "⚠️ KK balance not available\n";
-    reply += ptBalance !== null ? `💰 PT Balance: ${ptBalance}\n` : "⚠️ PT balance not available\n";
+    reply =
+      (kkBalance !== null ? `💰 KK Cash Balance: ${kkBalance}\n` : "⚠️ KK balance not available\n") +
+      (ptBalance !== null ? `💰 PT Cash Balance: ${ptBalance}` : "⚠️ PT balance not available");
   }
 
   await say(reply);
 });
 
-// ----------------------
-// Start Slack App
-// ----------------------
 (async () => {
   await app.start(process.env.PORT || 3000);
   console.log("⚡ UL CFO bot is running!");
