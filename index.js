@@ -1,97 +1,58 @@
-import { App } from "@slack/bolt";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
+import { App } from '@slack/bolt';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
+
 dotenv.config();
 
+// Slack app initialization
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  socketMode: false,
-  appToken: process.env.SLACK_APP_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET
 });
 
-// -------------------------
-// Helper: Refresh Access Token
-// -------------------------
-async function getAccessToken() {
+// Simple listener for "hello"
+app.message(/hello/i, async ({ message, say }) => {
+  await say(`Hello <@${message.user}> 👋 I can see 2 org(s) in Zoho Books!`);
+});
+
+// Example: cash balance command
+app.message(/cash balance/i, async ({ say, message }) => {
   try {
-    const response = await fetch("https://accounts.zoho.com/oauth/v2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        refresh_token: process.env.ZB_REFRESH_TOKEN,
-        client_id: process.env.ZB_CLIENT_ID,
-        client_secret: process.env.ZB_CLIENT_SECRET,
-        grant_type: "refresh_token",
-      }),
-    });
+    const orgs = [
+      { name: 'KK', id: process.env.ORG_ID_KK },
+      { name: 'PT', id: process.env.ORG_ID_PT }
+    ];
 
-    const data = await response.json();
-    if (data.access_token) {
-      return data.access_token;
-    } else {
-      console.error("Failed to refresh Zoho token:", data);
-      return null;
-    }
-  } catch (error) {
-    console.error("Error refreshing Zoho token:", error);
-    return null;
-  }
-}
-
-// -------------------------
-// Helper: Fetch Cash Balance
-// -------------------------
-async function getCashBalance(orgId) {
-  const token = await getAccessToken();
-  if (!token) return null;
-
-  try {
-    const response = await fetch(
-      `https://books.zoho.com/api/v3/chartofaccounts?organization_id=${orgId}`,
-      {
-        headers: { Authorization: `Zoho-oauthtoken ${token}` },
-      }
-    );
-
-    const data = await response.json();
-
-    if (data.chartofaccounts) {
-      const cashAccounts = data.chartofaccounts.filter(
-        (acc) => acc.account_type === "cash"
+    for (const org of orgs) {
+      const response = await fetch(
+        `${process.env.ZOHO_BOOKS_API}/bankaccounts?organization_id=${org.id}`,
+        {
+          headers: {
+            Authorization: `Zoho-oauthtoken ${process.env.ZB_ACCESS_TOKEN}`
+          }
+        }
       );
-      const total = cashAccounts.reduce((sum, acc) => sum + acc.current_balance, 0);
-      return total;
-    } else {
-      console.error("Zoho API error:", data);
-      return null;
+
+      const data = await response.json();
+
+      if (data && data.bankaccounts) {
+        const total = data.bankaccounts.reduce(
+          (sum, acct) => sum + (acct.balance || 0),
+          0
+        );
+        await say(`🏦 ${org.name} balance: ${total.toLocaleString()}`);
+      } else {
+        await say(`⚠️ ${org.name} balance not available`);
+      }
     }
-  } catch (error) {
-    console.error("Error fetching Zoho cash balance:", error);
-    return null;
+  } catch (err) {
+    console.error('Error fetching Zoho cash balance:', err);
+    await say(`⚠️ Sorry <@${message.user}>, I couldn’t fetch the cash balance right now.`);
   }
-}
-
-// -------------------------
-// Slack Command Handling
-// -------------------------
-app.message(/cash balance/i, async ({ message, say }) => {
-  await say("💡 Fetching latest cash balances...");
-
-  const kkBalance = await getCashBalance(process.env.ORG_ID_KK);
-  const ptBalance = await getCashBalance(process.env.ORG_ID_PT);
-
-  let reply = "";
-  reply += kkBalance !== null ? `🏦 KK Balance: ¥${kkBalance}\n` : "⚠️ KK balance not available\n";
-  reply += ptBalance !== null ? `🏦 PT Balance: Rp${ptBalance}\n` : "⚠️ PT balance not available\n";
-
-  await say(reply);
 });
 
-// -------------------------
-// Start Bot
-// -------------------------
+// Start the app
 (async () => {
   await app.start(process.env.PORT || 3000);
-  console.log("⚡ UL CFO bot is running!");
+  console.log('⚡ UL CFO bot is running!');
 })();
