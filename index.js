@@ -1,8 +1,6 @@
-import { App } from "@slack/bolt";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-
-dotenv.config();
+const { App } = require("@slack/bolt");
+const fetch = require("node-fetch");
+require("dotenv").config();
 
 const {
   SLACK_BOT_TOKEN,
@@ -37,7 +35,7 @@ async function refreshZohoToken() {
 }
 
 setInterval(refreshZohoToken, 50 * 60 * 1000);
-await refreshZohoToken();
+refreshZohoToken();
 
 async function fetchBankBalances(orgId) {
   if (!zohoAccessToken) await refreshZohoToken();
