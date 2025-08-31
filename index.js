@@ -86,7 +86,7 @@ app.message(/cash balance/i, async ({ say }) => {
 
   let response = "*💰 Cash Balances:*\n";
   response += `KK: ${kkBalance !== null ? "¥" + kkBalance.toLocaleString() : "⚠️ not available"}\n`;
-  response += `PT: ${ptBalance !== null ? "¥" + ptBalance.toLocaleString() : "⚠️ not available"}`;
+  response += `PT: ${ptBalance !== null ? "Rp " + ptBalance.toLocaleString() : "⚠️ not available"}`;
 
   await say(response);
 });
