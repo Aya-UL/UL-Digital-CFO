@@ -1,15 +1,12 @@
-import { App } from "@slack/bolt";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-
-dotenv.config();
+const { App } = require("@slack/bolt");
+const fetch = require("node-fetch");
+require("dotenv").config();
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
-// ✅ Zoho API base URL (correct domain)
 const ZOHO_BOOKS_API = "https://www.zohoapis.com/books/v3";
 
 async function getCashBalance(orgId) {
@@ -28,7 +25,6 @@ async function getCashBalance(orgId) {
       return null;
     }
 
-    // Find accounts with type = "cash"
     const cashAccounts = (data.chartofaccounts || []).filter(acc => acc.account_type === "cash");
     const total = cashAccounts.reduce((sum, acc) => sum + (acc.current_balance || 0), 0);
 
@@ -42,7 +38,6 @@ async function getCashBalance(orgId) {
 app.message(/cash balance/i, async ({ message, say }) => {
   let reply = "";
 
-  // Check both orgs unless user specifies
   if (/kk/i.test(message.text)) {
     const kkBalance = await getCashBalance(process.env.ORG_ID_KK);
     reply = kkBalance !== null ? `💰 KK Cash Balance: ${kkBalance}` : "⚠️ KK balance not available";
