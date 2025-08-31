@@ -1,7 +1,6 @@
 {
   "name": "ulcfo",
   "version": "1.0.0",
-  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,6 +8,6 @@
   "dependencies": {
     "@slack/bolt": "^3.17.1",
     "dotenv": "^16.3.1",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^2.6.7"
   }
 }

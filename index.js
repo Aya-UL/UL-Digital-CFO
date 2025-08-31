@@ -1,6 +1,6 @@
-import { App } from '@slack/bolt';
-import dotenv from 'dotenv';
-import fetch from 'node-fetch';
+const { App } = require('@slack/bolt');
+const dotenv = require('dotenv');
+const fetch = require('node-fetch');
 
 dotenv.config();
 
@@ -10,12 +10,12 @@ const app = new App({
   signingSecret: process.env.SLACK_SIGNING_SECRET
 });
 
-// Simple listener for "hello"
+// Simple hello test
 app.message(/hello/i, async ({ message, say }) => {
   await say(`Hello <@${message.user}> 👋 I can see 2 org(s) in Zoho Books!`);
 });
 
-// Example: cash balance command
+// Cash balance command
 app.message(/cash balance/i, async ({ say, message }) => {
   try {
     const orgs = [
@@ -51,7 +51,7 @@ app.message(/cash balance/i, async ({ say, message }) => {
   }
 });
 
-// Start the app
+// Start app
 (async () => {
   await app.start(process.env.PORT || 3000);
   console.log('⚡ UL CFO bot is running!');
