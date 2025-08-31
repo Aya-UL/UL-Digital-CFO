@@ -39,6 +39,17 @@ app.event("app_mention", async ({ event, say }) => {
   await say(`Hello <@${event.user}> 👋 I can see ${orgs.data.organizations.length} org(s) in Zoho Books!`);
 });
 
+// Cash Balance command
+app.message(/cash balance/i, async ({ message, say }) => {
+  try {
+    // For now, just reply with a placeholder
+    await say(`💰 Hi <@${message.user}>, I’ll fetch your Zoho Books cash balance here soon.`);
+  } catch (error) {
+    console.error("Error handling cash balance:", error);
+    await say("⚠️ Sorry, I had an issue fetching the cash balance.");
+  }
+});
+
 (async () => {
   await app.start(process.env.PORT || 3000);
   console.log("⚡️ UL CFO bot is running!");
