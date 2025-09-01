@@ -40,11 +40,14 @@ async function refreshZohoToken() {
 setInterval(refreshZohoToken, 50 * 60 * 1000);
 refreshZohoToken();
 
-// 🌐 Generic Zoho API caller
+// 🌐 Generic Zoho API caller (fixed URL builder)
 async function zohoApi(path, orgId) {
   if (!zohoAccessToken) await refreshZohoToken();
 
-  const url = `${ZOHO_BOOKS_BASE}${path}&organization_id=${orgId}`;
+  // Decide whether to use ? or &
+  const joinChar = path.includes("?") ? "&" : "?";
+  const url = `${ZOHO_BOOKS_BASE}${path}${joinChar}organization_id=${orgId}`;
+
   const res = await fetch(url, {
     headers: { Authorization: `Zoho-oauthtoken ${zohoAccessToken}` },
   });
@@ -133,7 +136,7 @@ app.message(/\bcash balance\b/i, async ({ message, say }) => {
   const queryDate = extractDateFromMessage(message.text);
 
   const data = await zohoApi(
-    `/reports/cash_flow_statement${queryDate ? `?date=${queryDate}` : "?"}`,
+    `/reports/cash_flow_statement${queryDate ? `?date=${queryDate}` : ""}`,
     ORG_ID_KK
   );
 
