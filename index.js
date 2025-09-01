@@ -47,7 +47,7 @@ async function zohoApi(path, orgId) {
   const joinChar = path.includes("?") ? "&" : "?";
   const url = `${ZOHO_BOOKS_BASE}${path}${joinChar}organization_id=${orgId}`;
 
-  console.log("🌐 Calling Zoho API:", url); // 👈 log the full request URL
+  console.log("🌐 Calling Zoho API:", url);
 
   const res = await fetch(url, {
     headers: { Authorization: `Zoho-oauthtoken ${zohoAccessToken}` },
@@ -116,7 +116,8 @@ async function getCashBalance(orgId, date = null) {
     dateToUse = `${yyyy}-${mm}-${dd}`;
   }
 
-  const path = `/reports/cash_flow_statement?from_date=${dateToUse}&to_date=${dateToUse}`;
+  // ✅ FIX: Zoho requires ?date=YYYY-MM-DD
+  const path = `/reports/cash_flow_statement?date=${dateToUse}`;
   const data = await zohoApi(path, orgId);
 
   let total = 0;
@@ -184,5 +185,5 @@ app.message(/\bcash balance\b/i, async ({ message, say }) => {
 // 🚀 Start bot
 (async () => {
   await app.start(process.env.PORT || 3000);
-  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, with URL logging)");
+  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, Cash in Bank + Cash Balance stable)");
 })();
