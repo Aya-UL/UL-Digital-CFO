@@ -72,21 +72,46 @@ async function getCash(orgId) {
   return total;
 }
 
+// 📄 Fetch Invoices
+async function getInvoices(orgId, filter = "unpaid") {
+  let path = `/invoices?status=${filter}`;
+  if (filter === "overdue") path = `/invoices?status=unpaid&overdue=true`;
+
+  const data = await zohoApi(path, orgId);
+
+  let total = 0;
+  let details = [];
+
+  if (data && data.invoices) {
+    data.invoices.forEach(inv => {
+      total += inv.balance || 0;
+      details.push({
+        customer: inv.customer_name,
+        invoice: inv.invoice_number,
+        due_date: inv.due_date,
+        amount: inv.balance
+      });
+    });
+  }
+
+  return { total, details };
+}
+
 // 🚀 Slack app init
 const app = new App({
   token: SLACK_BOT_TOKEN,
   signingSecret: SLACK_SIGNING_SECRET,
 });
 
-// 💬 Handle Cash queries (in bank / balance → same response)
+// 💬 Handle Cash queries (balance/in bank)
 app.message(/cash (in bank|balance)/i, async ({ say }) => {
   try {
     const kkTotal = await getCash(ORG_ID_KK);
     const ptTotal = await getCash(ORG_ID_PT);
 
     let response = `*💰 Cash Balances:*\n`;
-    response += `KK: ${kkTotal !== null ? "¥" + kkTotal.toLocaleString() : "⚠️ not available"}\n`;
-    response += `PT: ${ptTotal !== null ? "Rp " + ptTotal.toLocaleString() : "⚠️ not available"}`;
+    response += `• KK: ${kkTotal !== null ? "¥" + kkTotal.toLocaleString() : "⚠️ not available"}\n`;
+    response += `• PT: ${ptTotal !== null ? "Rp " + ptTotal.toLocaleString() : "⚠️ not available"}`;
 
     await say(response);
   } catch (err) {
@@ -95,8 +120,58 @@ app.message(/cash (in bank|balance)/i, async ({ say }) => {
   }
 });
 
+// 💬 Handle Invoices (Unpaid)
+app.message(/invoices$/i, async ({ say }) => {
+  try {
+    const unpaidKK = await getInvoices(ORG_ID_KK, "unpaid");
+    const unpaidPT = await getInvoices(ORG_ID_PT, "unpaid");
+
+    let response = `*📄 Unpaid Invoices:*\n`;
+    response += `• KK Total: ${unpaidKK.total ? "¥" + unpaidKK.total.toLocaleString() : "0"}\n`;
+    response += `• PT Total: ${unpaidPT.total ? "Rp " + unpaidPT.total.toLocaleString() : "0"}`;
+
+    await say(response);
+  } catch (err) {
+    console.error("❌ Error handling invoices:", err);
+    await say("⚠️ Unable to fetch invoices right now.");
+  }
+});
+
+// 💬 Handle Overdue Invoices
+app.message(/overdue invoices/i, async ({ say }) => {
+  try {
+    const overdueKK = await getInvoices(ORG_ID_KK, "overdue");
+    const overduePT = await getInvoices(ORG_ID_PT, "overdue");
+
+    let response = `*⚠️ Overdue Invoices:*\n`;
+
+    if (overdueKK.details.length > 0) {
+      response += `*KK:*\n`;
+      overdueKK.details.forEach(inv => {
+        response += `• ${inv.customer} | ${inv.invoice} | Due ${inv.due_date} | ¥${inv.amount.toLocaleString()}\n`;
+      });
+    } else {
+      response += `*KK:* None\n`;
+    }
+
+    if (overduePT.details.length > 0) {
+      response += `*PT:*\n`;
+      overduePT.details.forEach(inv => {
+        response += `• ${inv.customer} | ${inv.invoice} | Due ${inv.due_date} | Rp ${inv.amount.toLocaleString()}\n`;
+      });
+    } else {
+      response += `*PT:* None\n`;
+    }
+
+    await say(response);
+  } catch (err) {
+    console.error("❌ Error handling overdue invoices:", err);
+    await say("⚠️ Unable to fetch overdue invoices right now.");
+  }
+});
+
 // 🚀 Start bot
 (async () => {
   await app.start(process.env.PORT || 3000);
-  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, Cash queries unified)");
+  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, Cash + Invoices)");
 })();
