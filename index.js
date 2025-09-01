@@ -96,23 +96,6 @@ async function getCashInBank(orgId, date = null) {
   }
 }
 
-// 💰 Cash Balance (true cash & equivalents from Cash Flow Statement)
-async function getCashBalance(orgId, date = null) {
-  const dateParam = date ? `?date=${date}` : "";
-  const path = `/reports/cash_flow_statement${dateParam}`;
-  const data = await zohoApi(path, orgId);
-
-  let total = 0;
-  if (data && data.report && data.report.sections) {
-    const sections = data.report.sections;
-    const lastSection = sections[sections.length - 1];
-    if (lastSection && lastSection.name.includes("Cash and Cash Equivalents")) {
-      total = lastSection.closing_balance || 0;
-    }
-  }
-  return total;
-}
-
 // 📅 Parse date from message
 function extractDateFromMessage(text) {
   const parsed = chrono.parseDate(text);
@@ -132,7 +115,7 @@ const app = new App({
 });
 
 // 💬 Handle Cash in Bank
-app.message(/cash in bank/i, async ({ message, say }) => {
+app.message(/\bcash in bank\b/i, async ({ message, say }) => {
   const queryDate = extractDateFromMessage(message.text);
 
   const kkTotal = await getCashInBank(ORG_ID_KK, queryDate);
@@ -145,22 +128,22 @@ app.message(/cash in bank/i, async ({ message, say }) => {
   await say(response);
 });
 
-// 💬 Handle Cash Balance
-app.message(/cash balance/i, async ({ message, say }) => {
+// 💬 Handle Cash Balance (DEBUG MODE: logs raw response)
+app.message(/\bcash balance\b/i, async ({ message, say }) => {
   const queryDate = extractDateFromMessage(message.text);
 
-  const kkTotal = await getCashBalance(ORG_ID_KK, queryDate);
-  const ptTotal = await getCashBalance(ORG_ID_PT, queryDate);
+  const data = await zohoApi(
+    `/reports/cash_flow_statement${queryDate ? `?date=${queryDate}` : "?"}`,
+    ORG_ID_KK
+  );
 
-  let response = `*💰 Cash Balance${queryDate ? " as of " + queryDate : ""}:*\n`;
-  response += `KK: ${kkTotal !== null ? "¥" + kkTotal.toLocaleString() : "⚠️ not available"}\n`;
-  response += `PT: ${ptTotal !== null ? "Rp " + ptTotal.toLocaleString() : "⚠️ not available"}`;
+  console.log("📊 Raw Cash Flow Statement Response:", JSON.stringify(data, null, 2));
 
-  await say(response);
+  await say("✅ Logged raw Zoho Cash Flow Statement response to Render logs. Check the logs for details.");
 });
 
 // 🚀 Start bot
 (async () => {
   await app.start(process.env.PORT || 3000);
-  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, Cash in Bank + Cash Balance ready)");
+  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, Cash in Bank working, Cash Balance debug mode active)");
 })();
