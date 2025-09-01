@@ -1,5 +1,6 @@
 const { App } = require("@slack/bolt");
 const fetch = require("node-fetch");
+const chrono = require("chrono-node");
 require("dotenv").config();
 
 const {
@@ -39,38 +40,89 @@ async function refreshZohoToken() {
 setInterval(refreshZohoToken, 50 * 60 * 1000);
 refreshZohoToken();
 
-// 🏦 Fetch bank & cash balances
-async function fetchBankBalances(orgId) {
+// 🌐 Generic Zoho API caller
+async function zohoApi(path, orgId) {
   if (!zohoAccessToken) await refreshZohoToken();
 
-  try {
-    const url = `${ZOHO_BOOKS_BASE}/bankaccounts?organization_id=${orgId}`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Zoho-oauthtoken ${zohoAccessToken}` },
-    });
-    const data = await res.json();
+  const url = `${ZOHO_BOOKS_BASE}${path}&organization_id=${orgId}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Zoho-oauthtoken ${zohoAccessToken}` },
+  });
+  const data = await res.json();
 
-    if (!data || !data.bankaccounts) {
-      console.error("❌ Invalid Zoho response:", data);
-      return null;
-    }
+  if (!res.ok) {
+    console.error("❌ Zoho API error:", data);
+    throw new Error(data.message || "Zoho API call failed");
+  }
+  return data;
+}
+
+// 🏦 Cash in Bank (today or as of date)
+async function getCashInBank(orgId, date = null) {
+  if (date) {
+    // Historical via Balance Sheet
+    const path = `/reports/balance_sheet?date=${date}`;
+    const data = await zohoApi(path, orgId);
 
     let total = 0;
+    if (data && data.report && data.report.sections) {
+      for (const section of data.report.sections) {
+        if (section.name === "Assets") {
+          for (const subgroup of section.sub_sections) {
+            if (subgroup.name === "Current Assets") {
+              for (const line of subgroup.sub_sections) {
+                if (line.name === "Bank Accounts") {
+                  line.accounts.forEach(acc => {
+                    total += acc.bcy_amount;
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return total;
+  } else {
+    // Current via Bank Accounts API
+    const data = await zohoApi(`/bankaccounts?`, orgId);
+    let total = 0;
     data.bankaccounts.forEach(acc => {
-      if (
-        acc.is_active &&
-        (acc.account_type === "bank" || acc.account_type === "cash")
-      ) {
-        // ✅ Use base-currency balance (bcy_balance), normalized to JPY
+      if (acc.is_active && (acc.account_type === "bank" || acc.account_type === "cash")) {
         total += acc.bcy_balance;
       }
     });
-
     return total;
-  } catch (err) {
-    console.error("❌ Error fetching bank accounts:", err);
-    return null;
   }
+}
+
+// 💰 Cash Balance (true cash & equivalents from Cash Flow Statement)
+async function getCashBalance(orgId, date = null) {
+  const dateParam = date ? `?date=${date}` : "";
+  const path = `/reports/cash_flow_statement${dateParam}`;
+  const data = await zohoApi(path, orgId);
+
+  let total = 0;
+  if (data && data.report && data.report.sections) {
+    const sections = data.report.sections;
+    const lastSection = sections[sections.length - 1];
+    if (lastSection && lastSection.name.includes("Cash and Cash Equivalents")) {
+      total = lastSection.closing_balance || 0;
+    }
+  }
+  return total;
+}
+
+// 📅 Parse date from message
+function extractDateFromMessage(text) {
+  const parsed = chrono.parseDate(text);
+  if (!parsed) return null;
+
+  // format YYYY-MM-DD
+  const yyyy = parsed.getFullYear();
+  const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+  const dd = String(parsed.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 // 🚀 Slack app init
@@ -79,14 +131,30 @@ const app = new App({
   signingSecret: SLACK_SIGNING_SECRET,
 });
 
-// 💬 Handle cash balance request
-app.message(/cash balance/i, async ({ say }) => {
-  const kkBalance = await fetchBankBalances(ORG_ID_KK);
-  const ptBalance = await fetchBankBalances(ORG_ID_PT);
+// 💬 Handle Cash in Bank
+app.message(/cash in bank/i, async ({ message, say }) => {
+  const queryDate = extractDateFromMessage(message.text);
 
-  let response = "*💰 Cash Balances:*\n";
-  response += `KK: ${kkBalance !== null ? "¥" + kkBalance.toLocaleString() : "⚠️ not available"}\n`;
-  response += `PT: ${ptBalance !== null ? "Rp " + ptBalance.toLocaleString() : "⚠️ not available"}`;
+  const kkTotal = await getCashInBank(ORG_ID_KK, queryDate);
+  const ptTotal = await getCashInBank(ORG_ID_PT, queryDate);
+
+  let response = `*🏦 Cash in Bank${queryDate ? " as of " + queryDate : ""}:*\n`;
+  response += `KK: ${kkTotal !== null ? "¥" + kkTotal.toLocaleString() : "⚠️ not available"}\n`;
+  response += `PT: ${ptTotal !== null ? "Rp " + ptTotal.toLocaleString() : "⚠️ not available"}`;
+
+  await say(response);
+});
+
+// 💬 Handle Cash Balance
+app.message(/cash balance/i, async ({ message, say }) => {
+  const queryDate = extractDateFromMessage(message.text);
+
+  const kkTotal = await getCashBalance(ORG_ID_KK, queryDate);
+  const ptTotal = await getCashBalance(ORG_ID_PT, queryDate);
+
+  let response = `*💰 Cash Balance${queryDate ? " as of " + queryDate : ""}:*\n`;
+  response += `KK: ${kkTotal !== null ? "¥" + kkTotal.toLocaleString() : "⚠️ not available"}\n`;
+  response += `PT: ${ptTotal !== null ? "Rp " + ptTotal.toLocaleString() : "⚠️ not available"}`;
 
   await say(response);
 });
@@ -94,5 +162,5 @@ app.message(/cash balance/i, async ({ say }) => {
 // 🚀 Start bot
 (async () => {
   await app.start(process.env.PORT || 3000);
-  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, Phase 1)");
+  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, Cash in Bank + Cash Balance ready)");
 })();
