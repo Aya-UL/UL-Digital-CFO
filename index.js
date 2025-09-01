@@ -40,12 +40,14 @@ async function refreshZohoToken() {
 setInterval(refreshZohoToken, 50 * 60 * 1000);
 refreshZohoToken();
 
-// 🌐 Generic Zoho API caller (smart URL builder)
+// 🌐 Generic Zoho API caller (logs full URL)
 async function zohoApi(path, orgId) {
   if (!zohoAccessToken) await refreshZohoToken();
 
   const joinChar = path.includes("?") ? "&" : "?";
   const url = `${ZOHO_BOOKS_BASE}${path}${joinChar}organization_id=${orgId}`;
+
+  console.log("🌐 Calling Zoho API:", url); // 👈 log the full request URL
 
   const res = await fetch(url, {
     headers: { Authorization: `Zoho-oauthtoken ${zohoAccessToken}` },
@@ -54,7 +56,7 @@ async function zohoApi(path, orgId) {
 
   if (!res.ok) {
     console.error("❌ Zoho API error:", data);
-    throw new Error(data.message || "Zoho API call failed");
+    throw new Error(JSON.stringify(data));
   }
   return data;
 }
@@ -182,5 +184,5 @@ app.message(/\bcash balance\b/i, async ({ message, say }) => {
 // 🚀 Start bot
 (async () => {
   await app.start(process.env.PORT || 3000);
-  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, Cash in Bank + Cash Balance stable)");
+  console.log("⚡ UL CFO bot running (Slack ↔ Zoho, with URL logging)");
 })();
