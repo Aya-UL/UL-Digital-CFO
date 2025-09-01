@@ -102,14 +102,19 @@ async function getCashInBank(orgId, date = null) {
 
 // 💰 Cash Balance (closing balance from Cash Flow Statement)
 async function getCashBalance(orgId, date = null) {
-  let path;
+  let dateToUse;
+
   if (date) {
-    // Use from_date = to_date = requested date
-    path = `/reports/cash_flow_statement?from_date=${date}&to_date=${date}`;
+    dateToUse = date;
   } else {
-    path = `/reports/cash_flow_statement`;
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    dateToUse = `${yyyy}-${mm}-${dd}`;
   }
 
+  const path = `/reports/cash_flow_statement?from_date=${dateToUse}&to_date=${dateToUse}`;
   const data = await zohoApi(path, orgId);
 
   let total = 0;
