@@ -72,9 +72,21 @@ async function getCash(orgId) {
   return total;
 }
 
-// 📄 Fetch and categorize invoices
+// 📄 Fetch and categorize invoices (with pagination)
 async function getInvoicesSummary(orgId) {
-  const data = await zohoApi(`/invoices`, orgId);
+  let page = 1;
+  let invoices = [];
+  let more = true;
+
+  while (more) {
+    const data = await zohoApi(`/invoices?page=${page}`, orgId);
+    if (data && data.invoices && data.invoices.length > 0) {
+      invoices = invoices.concat(data.invoices);
+      page++;
+    } else {
+      more = false;
+    }
+  }
 
   let summary = {
     outstanding: 0,
@@ -84,36 +96,34 @@ async function getInvoicesSummary(orgId) {
     detailsOverdue: []
   };
 
-  if (data && data.invoices) {
-    const today = new Date().toISOString().split("T")[0];
-    const next7 = new Date();
-    next7.setDate(new Date().getDate() + 7);
-    const cutoff = next7.toISOString().split("T")[0];
+  const today = new Date().toISOString().split("T")[0];
+  const next7 = new Date();
+  next7.setDate(new Date().getDate() + 7);
+  const cutoff = next7.toISOString().split("T")[0];
 
-    data.invoices.forEach(inv => {
-      const status = inv.status.toLowerCase();
-      if (status === "sent" || status === "partially_paid") {
-        const balance = inv.balance || 0;
-        summary.outstanding += balance;
+  invoices.forEach(inv => {
+    const status = inv.status.toLowerCase();
+    if (status === "sent" || status === "partially_paid") {
+      const balance = inv.balance || 0;
+      summary.outstanding += balance;
 
-        if (inv.due_date) {
-          if (inv.due_date === today) {
-            summary.dueToday += balance;
-          } else if (inv.due_date < today) {
-            summary.overdue += balance;
-            summary.detailsOverdue.push({
-              customer: inv.customer_name,
-              invoice: inv.invoice_number,
-              due_date: inv.due_date,
-              amount: balance
-            });
-          } else if (inv.due_date > today && inv.due_date <= cutoff) {
-            summary.due7 += balance;
-          }
+      if (inv.due_date) {
+        if (inv.due_date === today) {
+          summary.dueToday += balance;
+        } else if (inv.due_date < today) {
+          summary.overdue += balance;
+          summary.detailsOverdue.push({
+            customer: inv.customer_name,
+            invoice: inv.invoice_number,
+            due_date: inv.due_date,
+            amount: balance
+          });
+        } else if (inv.due_date > today && inv.due_date <= cutoff) {
+          summary.due7 += balance;
         }
       }
-    });
-  }
+    }
+  });
 
   return summary;
 }
